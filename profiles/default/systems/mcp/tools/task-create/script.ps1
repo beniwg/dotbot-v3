@@ -17,6 +17,7 @@ function Invoke-TaskCreate {
     $needsInterview = $Arguments['needs_interview'] -eq $true
     $humanHours = $Arguments['human_hours']
     $aiHours = $Arguments['ai_hours']
+    $workingDir = $Arguments['working_dir']
     
     # Validate required fields
     if (-not $name) {
@@ -28,7 +29,19 @@ function Invoke-TaskCreate {
     }
     
     # Validate category
-    $validCategories = @('core', 'feature', 'enhancement', 'bugfix', 'infrastructure', 'ui-ux')
+    # Read categories from settings.default.json if available; fall back to defaults
+    $defaultCategories = @('core', 'feature', 'enhancement', 'bugfix', 'infrastructure', 'ui-ux')
+    $settingsPath = Join-Path $global:DotbotProjectRoot ".bot\defaults\settings.default.json"
+    if (Test-Path $settingsPath) {
+        $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+        if ($settings.task_categories) {
+            $validCategories = @($settings.task_categories) + $defaultCategories | Select-Object -Unique
+        } else {
+            $validCategories = $defaultCategories
+        }
+    } else {
+        $validCategories = $defaultCategories
+    }
     if ($category -and $category -notin $validCategories) {
         throw "Invalid category. Must be one of: $($validCategories -join ', ')"
     }
@@ -117,6 +130,7 @@ function Invoke-TaskCreate {
         needs_interview = $needsInterview
         human_hours = $humanHours
         ai_hours = $aiHours
+        working_dir = $workingDir
         created_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
         updated_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
         completed_at = $null

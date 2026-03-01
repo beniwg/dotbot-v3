@@ -1,0 +1,125 @@
+# profile-init.ps1 — multi-repo profile initialization
+# Runs after dotbot init -Profile multi-repo (not copied to .bot/)
+
+# ---------------------------------------------------------------------------
+# 1. Check required CLI tools
+# ---------------------------------------------------------------------------
+$requiredTools = @(
+    @{ Name = "git";    Required = $true;  Purpose = "Repo cloning, branch management" }
+    @{ Name = "az";     Required = $true;  Purpose = "Draft PR creation (az repos pr create)" }
+)
+
+$optionalTools = @(
+    @{ Name = "dotnet"; Required = $false; Purpose = "Build verification" }
+)
+
+foreach ($tool in $requiredTools) {
+    if (Get-Command $tool.Name -ErrorAction SilentlyContinue) {
+        Write-Success "$($tool.Name) found -- $($tool.Purpose)"
+    } else {
+        Write-DotbotWarning "$($tool.Name) not found -- required for: $($tool.Purpose)"
+    }
+}
+
+foreach ($tool in $optionalTools) {
+    if (Get-Command $tool.Name -ErrorAction SilentlyContinue) {
+        Write-Success "$($tool.Name) found -- $($tool.Purpose)"
+    } else {
+        Write-DotbotWarning "$($tool.Name) not found -- optional: $($tool.Purpose)"
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 2. Check MCP server availability
+# ---------------------------------------------------------------------------
+$mcpJsonPath = Join-Path $ProjectDir ".mcp.json"
+if (Test-Path $mcpJsonPath) {
+    $mcpConfig = Get-Content $mcpJsonPath -Raw | ConvertFrom-Json
+
+    # Check for dotbot MCP server (registered by init-project.ps1)
+    $mcpServers = $mcpConfig.mcpServers
+    if (-not $mcpServers) { $mcpServers = $mcpConfig }
+
+    if ($mcpServers.PSObject.Properties.Name -contains "dotbot") {
+        Write-Success "dotbot MCP server registered"
+    } else {
+        Write-DotbotWarning "dotbot MCP server not found in .mcp.json"
+    }
+
+    # Check for Atlassian MCP server (optional but recommended)
+    if ($mcpServers.PSObject.Properties.Name -contains "atlassian") {
+        Write-Success "atlassian MCP server registered"
+    } else {
+        Write-DotbotWarning "atlassian MCP server not found -- Phase 0 will use graceful degradation"
+        Write-Status "  To add Atlassian MCP: npx @anthropic/mcp-atlassian (requires API token with Jira + Confluence scopes)"
+    }
+} else {
+    Write-DotbotWarning ".mcp.json not found -- MCP servers will be configured during init"
+}
+
+# ---------------------------------------------------------------------------
+# 3. Bootstrap .env.local
+# ---------------------------------------------------------------------------
+$envLocal = Join-Path $ProjectDir ".env.local"
+$envExample = Join-Path $PSScriptRoot ".env.example"
+
+if (-not (Test-Path $envLocal)) {
+    Copy-Item $envExample $envLocal
+    Write-DotbotWarning ".env.local created from template -- edit it with your credentials"
+    Write-Status "  Path: $envLocal"
+} else {
+    Write-Success ".env.local already exists"
+}
+
+# Validate required variables are populated
+# Reuse Load-EnvFile from dotnet profile's Common.ps1 (copied to .bot/ by overlay)
+$commonPs1 = Join-Path $BotDir "hooks\dev\Common.ps1"
+if (Test-Path $commonPs1) {
+    . $commonPs1
+    $envVars = Load-EnvFile -Path $envLocal
+    $required = @("AZURE_DEVOPS_PAT", "AZURE_DEVOPS_ORG_URL")
+    $missing = $required | Where-Object { -not $envVars[$_] }
+
+    if ($missing) {
+        Write-DotbotWarning "Missing required values in .env.local: $($missing -join ', ')"
+        Write-Status "  Edit $envLocal and fill in the missing values before running workflows"
+    } else {
+        Write-Success "All required .env.local values populated"
+    }
+} else {
+    Write-DotbotWarning "Common.ps1 not found -- cannot validate .env.local values"
+    Write-Status "  Manually verify AZURE_DEVOPS_PAT and AZURE_DEVOPS_ORG_URL are set in $envLocal"
+}
+
+# ---------------------------------------------------------------------------
+# 4. Create repos/ directory and gitignore it
+# ---------------------------------------------------------------------------
+$reposDir = Join-Path $ProjectDir "repos"
+if (-not (Test-Path $reposDir)) {
+    New-Item -Path $reposDir -ItemType Directory | Out-Null
+    Write-Success "Created repos/ directory"
+} else {
+    Write-Success "repos/ directory already exists"
+}
+
+# Ensure repos/ is in .gitignore
+$gitignore = Join-Path $ProjectDir ".gitignore"
+if (Test-Path $gitignore) {
+    $content = Get-Content $gitignore -Raw
+    if ($content -notmatch 'repos/') {
+        Add-Content $gitignore "`nrepos/"
+        Write-Success "Added repos/ to .gitignore"
+    }
+} else {
+    Set-Content $gitignore "repos/`n"
+    Write-Success "Created .gitignore with repos/ entry"
+}
+
+# Ensure .env.local is in .gitignore
+$content = Get-Content $gitignore -Raw
+if ($content -notmatch '\.env\.local') {
+    Add-Content $gitignore ".env.local"
+    Write-Success "Added .env.local to .gitignore"
+}
+
+Write-Success "multi-repo profile initialized"
