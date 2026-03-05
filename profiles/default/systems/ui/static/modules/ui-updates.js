@@ -820,4 +820,3 @@ function updateSteeringPanel(instances) {
     if (priority) priority.disabled = !canSend;
     if (sendBtn) sendBtn.disabled = !canSend;
 }
-
